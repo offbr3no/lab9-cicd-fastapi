@@ -1,0 +1,63 @@
+name: Pipeline CI/CD Homologacao e Producao
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+
+env:
+  IMAGE_NAME: brenosilva2008/lab9-fastapi
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout do codigo
+        uses: actions/checkout@v4
+
+      - name: Login no Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build e Push da Imagem
+        run: |
+          docker build -t ${{ env.IMAGE_NAME }}:${{ github.sha }} .
+          docker push ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  deploy-homologacao:
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH em Homologacao
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOMOL_HOST }}
+          username: ${{ secrets.HOMOL_USERNAME }}
+          key: ${{ secrets.HOMOL_SSH_KEY }}
+          script: |
+            docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            docker stop app-homol || true
+            docker rm app-homol || true
+            docker run -d --name app-homol -p 8080:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  Deploy_Producao:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH em Producao
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USERNAME }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            docker pull ${{ env.IMAGE_NAME }}:${{ github.sha }}
+            docker stop app-prd || true
+            docker rm app-prd || true
+            docker run -d --name app-prd -p 8000:8000 ${{ env.IMAGE_NAME }}:${{ github.sha }}
